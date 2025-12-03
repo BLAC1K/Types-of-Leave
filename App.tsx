@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Users, FileBarChart, Settings, Plus, Sun, Briefcase, HeartPulse, Clock, Search, Calendar, Printer, Download, ChevronUp, ChevronDown, Filter, XCircle, Trash2, CloudCheck, Loader2, Home, User, FileText, Menu } from 'lucide-react';
+import { LayoutDashboard, Users, FileBarChart, Settings, Plus, Sun, Briefcase, HeartPulse, Clock, Search, Calendar, Printer, Download, ChevronUp, ChevronDown, Filter, XCircle, Trash2, CloudCheck, Loader2, Home, User, FileText, Menu, AlertTriangle, RefreshCw } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip, Legend } from 'recharts';
 import { MOCK_EMPLOYEES_LIST, LEAVE_TYPE_LABELS, LEAVE_COLORS } from './constants';
 import { LeaveRequest, Employee } from './types';
@@ -23,26 +23,40 @@ function App() {
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
 
   // --- Initial Data Fetching ---
-  useEffect(() => {
-    const initData = async () => {
-      setIsLoading(true);
-      try {
-        let fetchedEmployees = await fetchEmployeesAPI();
-        if (fetchedEmployees.length === 0) {
-          await bulkInsertEmployeesAPI(MOCK_EMPLOYEES_LIST);
-          fetchedEmployees = MOCK_EMPLOYEES_LIST;
+  const initData = async () => {
+    setIsLoading(true);
+    setConnectionError(false);
+    try {
+      let fetchedEmployees = await fetchEmployeesAPI();
+      
+      // If no employees found, try to seed initial data
+      // Note: This assumes RLS policies allow insert if table is empty, or anon has rights
+      if (fetchedEmployees.length === 0) {
+        // Attempt seed
+        const seedError = await bulkInsertEmployeesAPI(MOCK_EMPLOYEES_LIST);
+        if (!seedError) {
+           fetchedEmployees = MOCK_EMPLOYEES_LIST;
+        } else {
+           // If seeding fails (e.g. RLS blocks it), we might just have an empty DB or connection issue
+           // We'll proceed with empty array but user will see empty lists
         }
-        setEmployees(fetchedEmployees);
-        const fetchedLeaves = await fetchLeavesAPI();
-        setLeaves(fetchedLeaves);
-      } catch (error) {
-        console.error("Failed to load data:", error);
-      } finally {
-        setIsLoading(false);
       }
-    };
+      setEmployees(fetchedEmployees);
+      
+      const fetchedLeaves = await fetchLeavesAPI();
+      setLeaves(fetchedLeaves);
+    } catch (error) {
+      console.error("Failed to load data:", error);
+      setConnectionError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     initData();
   }, []);
 
@@ -130,7 +144,9 @@ function App() {
       createdAt: new Date().toISOString().split('T')[0],
     };
     try {
-      await insertLeaveAPI(leaveRequest);
+      const error = await insertLeaveAPI(leaveRequest);
+      if (error) throw error;
+
       setLeaves([leaveRequest, ...leaves]);
       if (newLeave.type === 'Annual') {
         const duration = calculateDuration(newLeave.date, newLeave.endDate);
@@ -145,7 +161,8 @@ function App() {
         }
       }
     } catch (error) {
-      alert("حدث خطأ أثناء الحفظ");
+      alert("حدث خطأ أثناء الحفظ. يرجى التأكد من الاتصال بالإنترنت.");
+      console.error(error);
     } finally {
       setIsSyncing(false);
     }
@@ -157,7 +174,9 @@ function App() {
     if (window.confirm('حذف السجل نهائياً؟ سيتم استرجاع الرصيد في حال كانت الإجازة سنوية.')) {
       setIsSyncing(true);
       try {
-        await deleteLeaveAPI(leaveId);
+        const error = await deleteLeaveAPI(leaveId);
+        if (error) throw error;
+
         if (leaveToDelete.type === 'Annual') {
           const duration = calculateDuration(leaveToDelete.date, leaveToDelete.endDate);
           const employee = employees.find(e => e.id === leaveToDelete.employeeId);
@@ -169,7 +188,7 @@ function App() {
         }
         setLeaves(prev => prev.filter(l => l.id !== leaveId));
       } catch (error) {
-        alert("حدث خطأ أثناء الحذف");
+        alert("حدث خطأ أثناء الحذف.");
       } finally {
         setIsSyncing(false);
       }
@@ -179,12 +198,14 @@ function App() {
   const handleUpdateEmployee = async (updatedEmp: Employee) => {
     setIsSyncing(true);
     try {
-      await upsertEmployeeAPI(updatedEmp);
+      const error = await upsertEmployeeAPI(updatedEmp);
+      if (error) throw error;
+
       setEmployees(prev => prev.map(emp => emp.id === updatedEmp.id ? updatedEmp : emp));
       setIsEmployeeModalOpen(false);
       setEditingEmployee(null);
     } catch (error) {
-      alert("حدث خطأ أثناء التحديث");
+      alert("حدث خطأ أثناء التحديث.");
     } finally {
       setIsSyncing(false);
     }
@@ -238,7 +259,34 @@ function App() {
     };
   });
 
-  if (isLoading) return <div className="h-screen flex flex-col items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-blue-600 mb-2" /> <span className="text-slate-500 text-sm">جاري التحميل...</span></div>;
+  if (isLoading) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
+        <Loader2 className="animate-spin text-blue-600 mb-2" size={32} /> 
+        <span className="text-slate-500 text-sm font-medium">جاري الاتصال بقاعدة البيانات...</span>
+      </div>
+    );
+  }
+
+  if (connectionError) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-4 text-center">
+        <div className="bg-red-50 p-4 rounded-full mb-4">
+           <AlertTriangle className="text-red-500" size={32} />
+        </div>
+        <h2 className="text-xl font-bold text-slate-800 mb-2">فشل الاتصال</h2>
+        <p className="text-slate-500 mb-6 max-w-xs">
+          لم نتمكن من الوصول إلى قاعدة البيانات. يرجى التأكد من تشغيل "database.sql" في Supabase.
+        </p>
+        <button 
+          onClick={initData}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200 font-bold"
+        >
+          <RefreshCw size={18} /> إعادة المحاولة
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20 md:pb-0 md:flex">
@@ -319,26 +367,30 @@ function App() {
             {/* Recent Activity List (Mobile Friendly) */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
               <h3 className="font-bold text-slate-800 mb-4 text-sm md:text-base">أحدث الإجازات</h3>
-              <div className="space-y-3">
-                {leaves.slice(0, 5).map(leave => {
-                   const emp = employees.find(e => e.id === leave.employeeId);
-                   const isHourly = leave.type === 'Hourly';
-                   return (
-                     <div key={leave.id} className="flex justify-between items-center p-3 rounded-lg bg-slate-50 border border-slate-100">
-                        <div className="flex items-center gap-3">
-                           <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${LEAVE_COLORS[leave.type].split(' ')[1]} ${LEAVE_COLORS[leave.type].split(' ')[0]}`}>
-                              {leave.type === 'Annual' ? <Sun size={14} /> : leave.type === 'Sick' ? <HeartPulse size={14} /> : leave.type === 'Hourly' ? <Clock size={14} /> : <Briefcase size={14} />}
-                           </div>
-                           <div className="overflow-hidden">
-                              <p className="font-bold text-slate-800 text-sm truncate">{emp?.name}</p>
-                              <p className="text-xs text-slate-500">{leave.date}</p>
-                           </div>
-                        </div>
-                        <button onClick={() => handleDeleteLeave(leave.id)} className="text-red-400 p-2"><Trash2 size={16}/></button>
-                     </div>
-                   );
-                })}
-              </div>
+              {leaves.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-sm">لا توجد سجلات محفوظة</div>
+              ) : (
+                <div className="space-y-3">
+                  {leaves.slice(0, 5).map(leave => {
+                     const emp = employees.find(e => e.id === leave.employeeId);
+                     const isHourly = leave.type === 'Hourly';
+                     return (
+                       <div key={leave.id} className="flex justify-between items-center p-3 rounded-lg bg-slate-50 border border-slate-100">
+                          <div className="flex items-center gap-3">
+                             <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${LEAVE_COLORS[leave.type].split(' ')[1]} ${LEAVE_COLORS[leave.type].split(' ')[0]}`}>
+                                {leave.type === 'Annual' ? <Sun size={14} /> : leave.type === 'Sick' ? <HeartPulse size={14} /> : leave.type === 'Hourly' ? <Clock size={14} /> : <Briefcase size={14} />}
+                             </div>
+                             <div className="overflow-hidden">
+                                <p className="font-bold text-slate-800 text-sm truncate">{emp?.name}</p>
+                                <p className="text-xs text-slate-500">{leave.date}</p>
+                             </div>
+                          </div>
+                          <button onClick={() => handleDeleteLeave(leave.id)} className="text-red-400 p-2"><Trash2 size={16}/></button>
+                       </div>
+                     );
+                  })}
+                </div>
+              )}
             </div>
             
             {/* Chart (Hidden on small mobile if needed, or simplified) */}
@@ -370,7 +422,6 @@ function App() {
                   className="w-full pr-10 pl-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 shadow-sm text-sm"
                 />
               </div>
-              {/* Simple Filter Toggle could go here */}
             </div>
 
             {/* Mobile Cards List */}
@@ -513,12 +564,31 @@ function App() {
         {activeTab === 'settings' && (
           <div className="space-y-4 animate-in fade-in duration-300">
              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 text-center">
-                <CloudCheck className="mx-auto text-emerald-500 mb-3" size={40} />
+                <CloudCheck className={`mx-auto mb-3 ${connectionError ? 'text-red-500' : 'text-emerald-500'}`} size={40} />
                 <h3 className="font-bold text-slate-800">حالة النظام</h3>
-                <p className="text-sm text-emerald-600 mt-1">متصل بقاعدة البيانات السحابية</p>
+                <p className={`text-sm mt-1 ${connectionError ? 'text-red-500' : 'text-emerald-600'}`}>
+                   {connectionError ? 'فشل الاتصال بقاعدة البيانات' : 'متصل بقاعدة البيانات السحابية'}
+                </p>
+                {connectionError && (
+                  <button onClick={initData} className="mt-4 px-4 py-2 bg-slate-100 rounded-lg text-sm text-slate-600">
+                    إعادة محاولة الاتصال
+                  </button>
+                )}
              </div>
+             
+             <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-sm text-blue-800">
+                <h4 className="font-bold flex items-center gap-2 mb-2"><AlertTriangle size={16}/> تعليمات هامة</h4>
+                <p className="mb-2">لضمان عمل التطبيق، يجب عليك تشغيل الكود في قاعدة البيانات.</p>
+                <ol className="list-decimal list-inside space-y-1 opacity-80">
+                  <li>اذهب إلى Supabase Project</li>
+                  <li>افتح SQL Editor</li>
+                  <li>الصق الكود الموجود في ملف database.sql</li>
+                  <li>اضغط Run</li>
+                </ol>
+             </div>
+
              <div className="text-center text-xs text-slate-400 mt-8">
-               نسخة الموبايل 1.0
+               نسخة الموبايل 1.0.2
              </div>
           </div>
         )}
