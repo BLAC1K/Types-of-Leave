@@ -301,7 +301,7 @@ function App() {
           {[
             { id: 'dashboard', label: 'الرئيسية', icon: LayoutDashboard },
             { id: 'employees', label: 'المنتسبين', icon: Users },
-            { id: 'reports', label: 'الجرد والتقارير', icon: FileBarChart },
+            { id: 'reports', label: 'التقارير', icon: FileBarChart },
             { id: 'settings', label: 'الإعدادات', icon: Settings },
           ].map(item => (
             <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === item.id ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50'}`}>
@@ -500,7 +500,7 @@ function App() {
              {/* Summary Cards (Mobile) */}
              <div className="md:hidden space-y-3 no-print">
                 {inventoryData.map(emp => {
-                   const hasLeaves = Object.values(emp.reportStats).some(v => v > 0);
+                   const hasLeaves = Object.values(emp.reportStats).some((v) => (v as number) > 0);
                    if (!hasLeaves) return null;
                    return (
                      <div key={emp.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">

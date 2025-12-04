@@ -1,3 +1,10 @@
+// Declaration to make TypeScript happy with process.env usage
+declare var process: {
+  env: {
+    API_KEY: string;
+    [key: string]: string | undefined;
+  };
+};
 
 export type LeaveType = 'Annual' | 'Sick' | 'Unpaid' | 'Hourly';
 
